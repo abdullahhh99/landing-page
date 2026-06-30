@@ -47,7 +47,8 @@ const transporter = nodemailer.createTransport({
   },
   connectionTimeout: 10000, // 10s max to connect
   greetingTimeout: 10000,
-  socketTimeout: 10000
+  socketTimeout: 10000,
+  family: 4 // force IPv4 — Render's free tier doesn't support outbound IPv6 to Gmail
 });
 
 const JOB_TITLE = process.env.JOB_TITLE || 'Software Engineer Intern';
