@@ -3,7 +3,7 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -35,21 +35,8 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
-// --- Mailer setup ---
-// Works with Gmail (use an App Password) or any SMTP provider.
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: Number(process.env.SMTP_PORT) || 587,
-  secure: false, // true for port 465
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS
-  },
-  connectionTimeout: 10000, // 10s max to connect
-  greetingTimeout: 10000,
-  socketTimeout: 10000,
-  family: 4 // force IPv4 — Render's free tier doesn't support outbound IPv6 to Gmail
-});
+// --- Mailer setup (Resend — sends over HTTPS, works on Render free tier) ---
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 const JOB_TITLE = process.env.JOB_TITLE || 'Software Engineer Intern';
 const COMPANY_NAME = process.env.COMPANY_NAME || 'Our Company';
@@ -69,7 +56,7 @@ app.post('/apply', upload.single('resume'), async (req, res) => {
     const finalJobTitle = jobTitle || JOB_TITLE;
     const finalCompanyName = companyName || COMPANY_NAME;
 
-    // Log application (you could also write this to a JSON/CSV file or DB)
+    // Log application
     const record = {
       firstName, lastName, email, address,
       jobTitle: finalJobTitle,
@@ -82,12 +69,12 @@ app.post('/apply', upload.single('resume'), async (req, res) => {
     existing.push(record);
     fs.writeFileSync(logFile, JSON.stringify(existing, null, 2));
 
-    // Respond to the browser immediately — don't make the user wait on email delivery.
+    // Respond immediately — don't make the user wait on email delivery.
     res.json({ ok: true, message: 'Application submitted. Confirmation email is on its way.' });
 
-    // Send confirmation email in the background (after response already sent).
-    transporter.sendMail({
-      from: `"${finalCompanyName}" <${process.env.SMTP_USER}>`,
+    // Send confirmation email in the background via Resend's HTTPS API.
+    resend.emails.send({
+      from: process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev',
       to: email,
       subject: `Application Received: ${finalJobTitle}`,
       html: `
