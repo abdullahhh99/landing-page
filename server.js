@@ -44,7 +44,10 @@ const transporter = nodemailer.createTransport({
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS
-  }
+  },
+  connectionTimeout: 10000, // 10s max to connect
+  greetingTimeout: 10000,
+  socketTimeout: 10000
 });
 
 const JOB_TITLE = process.env.JOB_TITLE || 'Software Engineer Intern';
@@ -78,8 +81,11 @@ app.post('/apply', upload.single('resume'), async (req, res) => {
     existing.push(record);
     fs.writeFileSync(logFile, JSON.stringify(existing, null, 2));
 
-    // Send confirmation email
-    await transporter.sendMail({
+    // Respond to the browser immediately — don't make the user wait on email delivery.
+    res.json({ ok: true, message: 'Application submitted. Confirmation email is on its way.' });
+
+    // Send confirmation email in the background (after response already sent).
+    transporter.sendMail({
       from: `"${finalCompanyName}" <${process.env.SMTP_USER}>`,
       to: email,
       subject: `Application Received: ${finalJobTitle}`,
@@ -93,9 +99,10 @@ app.post('/apply', upload.single('resume'), async (req, res) => {
           </p>
         </div>
       `
+    }).catch(err => {
+      console.error('Email send failed:', err.message);
     });
 
-    res.json({ ok: true, message: 'Application submitted. Confirmation email sent.' });
   } catch (err) {
     console.error(err);
     res.status(500).json({ ok: false, error: err.message || 'Something went wrong.' });
