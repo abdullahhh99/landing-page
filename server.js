@@ -3,12 +3,11 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-const { Resend } = require('resend');
+const emailjs = require('@emailjs/nodejs');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// --- Storage setup (resumes saved locally on disk) ---
 const UPLOAD_DIR = path.join(__dirname, 'uploads');
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
@@ -22,7 +21,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB max
+  limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const allowed = ['.pdf', '.doc', '.docx'];
     const ext = path.extname(file.originalname).toLowerCase();
@@ -35,13 +34,15 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
-// --- Mailer setup (Resend — sends over HTTPS, works on Render free tier) ---
-const resend = new Resend(process.env.RESEND_API_KEY);
+// --- EmailJS setup ---
+emailjs.init({
+  publicKey: process.env.EMAILJS_PUBLIC_KEY,
+  privateKey: process.env.EMAILJS_PRIVATE_KEY,
+});
 
 const JOB_TITLE = process.env.JOB_TITLE || 'Software Engineer Intern';
 const COMPANY_NAME = process.env.COMPANY_NAME || 'Our Company';
 
-// --- Routes ---
 app.post('/apply', upload.single('resume'), async (req, res) => {
   try {
     const { firstName, lastName, email, address, jobTitle, companyName } = req.body;
@@ -56,7 +57,6 @@ app.post('/apply', upload.single('resume'), async (req, res) => {
     const finalJobTitle = jobTitle || JOB_TITLE;
     const finalCompanyName = companyName || COMPANY_NAME;
 
-    // Log application
     const record = {
       firstName, lastName, email, address,
       jobTitle: finalJobTitle,
@@ -69,26 +69,21 @@ app.post('/apply', upload.single('resume'), async (req, res) => {
     existing.push(record);
     fs.writeFileSync(logFile, JSON.stringify(existing, null, 2));
 
-    // Respond immediately — don't make the user wait on email delivery.
+    // Respond immediately
     res.json({ ok: true, message: 'Application submitted. Confirmation email is on its way.' });
 
-    // Send confirmation email in the background via Resend's HTTPS API.
-    resend.emails.send({
-      from: process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev',
-      to: email,
-      subject: `Application Received: ${finalJobTitle}`,
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto;">
-          <h2>Thanks for applying, ${firstName}!</h2>
-          <p>We've received your application for the <strong>${finalJobTitle}</strong> position at ${finalCompanyName}.</p>
-          <p>Our team will review your resume and get back to you if there's a good fit.</p>
-          <p style="color:#888; font-size: 12px; margin-top: 30px;">
-            This is a test/demo confirmation email generated automatically.
-          </p>
-        </div>
-      `
-    }).catch(err => {
-      console.error('Email send failed:', err.message);
+    // Send email in background
+    emailjs.send(
+      process.env.EMAILJS_SERVICE_ID,
+      process.env.EMAILJS_TEMPLATE_ID,
+      {
+        to_email: email,
+        first_name: firstName,
+        job_title: finalJobTitle,
+        company_name: finalCompanyName,
+      }
+    ).catch(err => {
+      console.error('Email send failed:', err);
     });
 
   } catch (err) {
